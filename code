@@ -1,0 +1,74 @@
+Imagine we want to ensure we've covered all the important combinations of requests and the resulting grant. We can add a cross coverage point to our `arbiter_coverage` class:
+
+```systemverilog
+class arbiter_coverage;
+  covergroup arbiter_cg @(posedge clk);
+    // Cover point for single request scenarios
+    cp_single_req1: coverpoint req1 iff (!req2) {
+      bins req1_high = (1);
+    }
+    cp_single_req2: coverpoint req2 iff (!req1) {
+      bins req2_high = (1);
+    }
+
+    // Cover point for priority scenario
+    cp_priority: coverpoint req1 && req2 {
+      bins both_high = (1);
+    }
+
+    // Cover point for idle state
+    cp_idle: coverpoint current_state {
+      bins idle_state = IDLE;
+    }
+
+    // Cover point for grant signals
+    cp_grant: coverpoint {gnt1, gnt2} {
+      bins gnt1_asserted = 2'b10;
+      bins gnt2_asserted = 2'b01;
+      bins both_gnt_low  = 2'b00;
+    }
+
+    // Cross coverage between requests and grants
+    cr_req_grant: cross cp_single_req1, cp_single_req2, cp_priority, cp_grant;
+
+    // Cover point for grant transitions (as before)
+    cp_grant_transition: coverpoint current_state iff (gnt1 || gnt2) {
+      bins granting = {GNT1, GNT2};
+      bins next_idle = (IDLE);
+      transitions (granting => next_idle);
+    }
+  endgroup : arbiter_cg
+
+  function new();
+    arbiter_cg = new();
+  endfunction
+
+  task sample_coverage();
+    arbiter_cg.sample();
+  endtask
+endclass : arbiter_coverage
+```
+
+Here's what's new:
+
+* **`cp_grant: coverpoint {gnt1, gnt2} { ... }`**: We've added a cover point that looks at the combined value of `gnt1` and `gnt2`. This allows us to create bins for when `gnt1` is asserted, when `gnt2` is asserted, and when both are low.
+* **`cr_req_grant: cross cp_single_req1, cp_single_req2, cp_priority, cp_grant;`**: This is the crucial part. The `cross` construct takes a list of cover points (`cp_single_req1`, `cp_single_req2`, `cp_priority`, and `cp_grant`) and automatically generates coverage bins for all possible combinations of the bins within these individual cover points.
+
+So, the `cr_req_grant` cross coverage will create bins for scenarios like:
+
+* `req1` high (and `req2` low) AND `gnt1` asserted (and `gnt2` low)
+* `req1` high (and `req2` low) AND `gnt2` asserted (and `gnt1` low)
+* `req1` high (and `req2` low) AND both grants low
+* `req2` high (and `req1` low) AND `gnt1` asserted (and `gnt2` low)
+* `req2` high (and `req1` low) AND `gnt2` asserted (and `gnt1` low)
+* `req2` high (and `req1` low) AND both grants low
+* Both requests high AND `gnt1` asserted (and `gnt2` low)
+* Both requests high AND `gnt2` asserted (and `gnt1` low)
+* Both requests high AND both grants low
+* ... and so on for all combinations of the bins in the crossed cover points.
+
+By examining the coverage report for `cr_req_grant`, you can ensure that your testbench has exercised all the expected interactions between the input requests and the output grants. For instance, you'd want to see that when `req1` is high and `req2` is low, eventually `gnt1` becomes high, and not `gnt2`.
+
+You would use the same testbench structure as before to stimulate the `arbiter` DUT and sample the `arbiter_coverage` object. The cross coverage will automatically be sampled when you call `cov.sample_coverage()`.
+
+Cross coverage is a powerful tool for uncovering subtle bugs that might only manifest under specific combinations of conditions. It helps you achieve a more thorough verification of your design's behavior.
